@@ -1,0 +1,83 @@
+<template>
+  <div class="app">
+    <nav class="nav">
+      <button 
+        :class="{ active: currentView === 'static' }" 
+        @click="currentView = 'static'"
+      >
+        MarkdownRenderer
+      </button>
+      <button 
+        :class="{ active: currentView === 'plugin' }" 
+        @click="currentView = 'plugin'"
+      >
+        标准插件
+      </button>
+      <button 
+        :class="{ active: currentView === 'dynamic' }" 
+        @click="currentView = 'dynamic'"
+      >
+        动态渲染 (SSE)
+      </button>
+    </nav>
+    
+    <StaticDemo v-if="currentView === 'static'" />
+    <PluginDemo v-else-if="currentView === 'plugin'" />
+    <DynamicDemo v-else />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import StaticDemo from './StaticDemo.vue';
+import PluginDemo from './PluginDemo.vue';
+import DynamicDemo from './DynamicDemo.vue';
+
+const currentView = ref<'static' | 'plugin' | 'dynamic'>('static');
+</script>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #f5f5f5;
+}
+
+.app {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.nav button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.nav button:hover {
+  background: #f0f0f0;
+}
+
+.nav button.active {
+  background: #4caf50;
+  color: white;
+}
+</style>
