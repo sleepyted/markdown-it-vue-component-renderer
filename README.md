@@ -40,9 +40,9 @@ const markdownContent = ref(`
 </script>
 ```
 
-### 方式二：markdown-it 插件
+### 方式二：markdown-it 插件 + mountComponents
 
-作为标准 markdown-it 插件使用，需要自行处理 Vue 组件挂载：
+作为标准 markdown-it 插件使用，配合 `mountComponents` 辅助函数自动挂载：
 
 ```vue
 <template>
@@ -52,7 +52,7 @@ const markdownContent = ref(`
 <script setup>
 import { ref, onMounted, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
-import MarkdownVueComponent from 'markdown-it-vue-component';
+import MarkdownVueComponent, { mountComponents } from 'markdown-it-vue-component';
 import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
@@ -62,39 +62,22 @@ const markdownContent = ref(`
 :::
 `);
 
-const componentMap = { Table, Alert };
+const components = { table: Table, alert: Alert };
 
 async function renderMarkdown() {
   const mdi = new MarkdownIt({ html: true });
   
-  // 使用插件
+  // 使用插件，直接传入 Vue 组件
   mdi.use(MarkdownVueComponent, {
-    components: {
-      table: 'Table',
-      alert: 'Alert'
-    }
+    components
   });
   
   // 渲染 HTML
   const html = mdi.render(markdownContent.value);
   containerRef.value.innerHTML = html;
   
-  // 手动挂载 Vue 组件
-  const { createApp } = await import('vue');
-  const elements = containerRef.value.querySelectorAll('[data-vue-component]');
-  
-  elements.forEach((el) => {
-    const componentName = el.getAttribute('data-vue-component');
-    const props = JSON.parse(el.getAttribute('data-props') || '{}');
-    const component = componentMap[componentName];
-    
-    if (component) {
-      const mountPoint = document.createElement('div');
-      el.innerHTML = '';
-      el.appendChild(mountPoint);
-      createApp(component, props).mount(mountPoint);
-    }
-  });
+  // 使用 mountComponents 辅助函数自动挂载 Vue 组件
+  await mountComponents(containerRef.value, components);
 }
 
 onMounted(renderMarkdown);
@@ -168,16 +151,27 @@ interface MarkdownItComponentOptions {
 
 ```typescript
 interface MarkdownVueComponentOptions {
-  components: Record<string, string | ComponentConfig>;
+  components: Record<string, string | Component | ComponentConfig>;
   containerClass?: string;
   wrapperTag?: string;
 }
 
 interface ComponentConfig {
-  component: string;
+  component: string | Component;
   propsParser?: (content: string, tokens: Token[]) => Record<string, unknown>;
 }
 ```
+
+### mountComponents 函数
+
+```typescript
+async function mountComponents(
+  container: HTMLElement,
+  components: Record<string, string | Component | ComponentConfig>
+): Promise<void>
+```
+
+自动扫描容器中的 `[data-vue-component]` 元素并挂载对应的 Vue 组件。
 
 ## 动态渲染
 

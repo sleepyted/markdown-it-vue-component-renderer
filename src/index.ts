@@ -1,13 +1,14 @@
 import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
+import type { Component } from 'vue';
 
 export interface ComponentConfig {
-  component: string;
+  component: string | Component;
   propsParser?: (content: string, tokens: Token[]) => Record<string, unknown>;
 }
 
 export interface MarkdownVueComponentOptions {
-  components: Record<string, string | ComponentConfig>;
+  components: Record<string, string | Component | ComponentConfig>;
   containerClass?: string;
   wrapperTag?: string;
 }
@@ -23,10 +24,25 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
 
   for (const name of componentNames) {
     const config = components[name];
-    const componentName = typeof config === 'string' ? config : config.component;
-    const customPropsParser = typeof config === 'object' && config.propsParser 
-      ? config.propsParser 
-      : null;
+    let componentName: string;
+    let componentRef: Component | null = null;
+    let customPropsParser: ((content: string, tokens: Token[]) => Record<string, unknown>) | null = null;
+    
+    if (typeof config === 'string') {
+      componentName = config;
+    } else if (typeof config === 'object' && 'component' in config) {
+      const comp = config.component;
+      if (typeof comp === 'string') {
+        componentName = comp;
+      } else {
+        componentName = name;
+        componentRef = comp;
+      }
+      customPropsParser = config.propsParser || null;
+    } else {
+      componentName = name;
+      componentRef = config as Component;
+    }
 
     const containerName = `vue_component_${name}`;
     
@@ -67,10 +83,14 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
         openToken.markup = `:::${name}`;
         openToken.block = true;
         openToken.meta = {
-          componentName
+          componentName,
+          componentRef
         };
         openToken.attrSet('class', `${containerClass} ${containerClass}--${name}`);
         openToken.attrSet('data-vue-component', componentName);
+        if (componentRef) {
+          openToken.attrSet('data-vue-component-instance', 'true');
+        }
 
         const contentLines: string[] = [];
         for (let i = startLine + 1; i < nextLine; i++) {
@@ -121,7 +141,7 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
     
     md.renderer.rules[`${containerName}_open`] = function(tokens, idx, options, env, self) {
       const token = tokens[idx];
-      const componentName = token.meta?.componentName || name;
+      const compName = token.meta?.componentName || name;
       const parsedProps = token.meta?.parsedProps || {};
       
       const propsJson = JSON.stringify(parsedProps);
@@ -134,13 +154,57 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
 
       const attrs = self.renderAttrs(tokens[idx]);
       
-      return `<${wrapperTag}${attrs} data-vue-component="${componentName}" data-props="${escapedProps}">`;
+      return `<${wrapperTag}${attrs} data-vue-component="${compName}" data-props="${escapedProps}">`;
     };
 
     md.renderer.rules[`${containerName}_close`] = function() {
       return `</${wrapperTag}>`;
     };
   }
+}
+
+export async function mountComponents(
+  container: HTMLElement,
+  components: Record<string, string | Component | ComponentConfig>
+): Promise<void> {
+  const { createApp } = await import('vue');
+  
+  const componentMap: Record<string, Component> = {};
+  for (const [key, config] of Object.entries(components)) {
+    if (typeof config === 'string') {
+      continue;
+    } else if (typeof config === 'object' && 'component' in config) {
+      if (typeof config.component !== 'string') {
+        componentMap[key] = config.component;
+      }
+    } else {
+      componentMap[key] = config as Component;
+    }
+  }
+  
+  const elements = container.querySelectorAll('[data-vue-component]');
+  
+  elements.forEach((el) => {
+    const componentName = el.getAttribute('data-vue-component') || '';
+    const propsJson = el.getAttribute('data-props') || '{}';
+    
+    let props: Record<string, unknown> = {};
+    try {
+      props = JSON.parse(propsJson);
+    } catch (e) {
+      console.warn(`Failed to parse props for component ${componentName}:`, e);
+    }
+    
+    const component = componentMap[componentName];
+    
+    if (component) {
+      const mountPoint = document.createElement('div');
+      el.innerHTML = '';
+      el.appendChild(mountPoint);
+      const app = createApp(component, props);
+      app.mount(mountPoint);
+    }
+  });
 }
 
 export { MarkdownRenderer } from './renderer.js';

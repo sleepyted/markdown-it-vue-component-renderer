@@ -19,11 +19,18 @@
       >
         动态渲染 (SSE)
       </button>
+      <button 
+        :class="{ active: currentView === 'pluginDynamic' }" 
+        @click="currentView = 'pluginDynamic'"
+      >
+        标准插件 + 动态
+      </button>
     </nav>
     
     <StaticDemo v-if="currentView === 'static'" />
     <PluginDemo v-else-if="currentView === 'plugin'" />
-    <DynamicDemo v-else />
+    <DynamicDemo v-else-if="currentView === 'dynamic'" />
+    <PluginDynamicDemo v-else />
   </div>
 </template>
 
@@ -32,8 +39,9 @@ import { ref } from 'vue';
 import StaticDemo from './StaticDemo.vue';
 import PluginDemo from './PluginDemo.vue';
 import DynamicDemo from './DynamicDemo.vue';
+import PluginDynamicDemo from './PluginDynamicDemo.vue';
 
-const currentView = ref<'static' | 'plugin' | 'dynamic'>('static');
+const currentView = ref<'static' | 'plugin' | 'dynamic' | 'pluginDynamic'>('static');
 </script>
 
 <style>

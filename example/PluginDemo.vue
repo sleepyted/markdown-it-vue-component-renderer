@@ -5,33 +5,25 @@
     <div class="demo-section">
       <h2>使用方式</h2>
       <pre><code>import MarkdownIt from 'markdown-it';
-import MarkdownVueComponent from 'markdown-it-vue-component';
+import MarkdownVueComponent, { mountComponents } from 'markdown-it-vue-component';
+import Table from './Table.vue';
+import Alert from './Alert.vue';
 
 const mdi = new MarkdownIt();
 mdi.use(MarkdownVueComponent, {
   components: {
-    table: 'Table',
-    alert: 'Alert'
+    table: Table,    // 直接传入 Vue 组件
+    alert: Alert     // 直接传入 Vue 组件
   }
 });
 
 const html = mdi.render(markdownContent);
+container.innerHTML = html;
 
-// 需要自行处理 Vue 组件挂载
-const { createApp } = await import('vue');
-const elements = container.querySelectorAll('[data-vue-component]');
-
-elements.forEach((el) => {
-  const componentName = el.getAttribute('data-vue-component');
-  const props = JSON.parse(el.getAttribute('data-props') || '{}');
-  const component = componentMap[componentName];
-  
-  if (component) {
-    const mountPoint = document.createElement('div');
-    el.innerHTML = '';
-    el.appendChild(mountPoint);
-    createApp(component, props).mount(mountPoint);
-  }
+// 使用 mountComponents 辅助函数自动挂载
+await mountComponents(container, {
+  table: Table,
+  alert: Alert
 });</code></pre>
     </div>
     
@@ -55,14 +47,14 @@ elements.forEach((el) => {
 <script setup lang="ts">
 import { ref, onMounted, watch, type Component } from 'vue';
 import MarkdownIt from 'markdown-it';
-import MarkdownVueComponent from '../src/index';
+import MarkdownVueComponent, { mountComponents } from '../src/index';
 import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
 const markdownContent = ref(`
 # 标准插件使用示例
 
-这个示例展示了如何作为标准 markdown-it 插件使用。
+这个示例展示了如何作为标准 markdown-it 插件使用，配合 \`mountComponents\` 辅助函数自动挂载 Vue 组件。
 
 ## 表格组件
 
@@ -71,10 +63,10 @@ const markdownContent = ref(`
 
 ## 警告组件
 
-:::alert {"type": "info", "title": "提示", "content": "这是通过标准 markdown-it 插件渲染的组件"}
+:::alert {"type": "info", "title": "提示", "content": "使用 mountComponents 辅助函数自动挂载"}
 :::
 
-:::alert {"type": "success", "content": "组件挂载由用户手动处理"}
+:::alert {"type": "success", "content": "无需手动处理组件挂载逻辑"}
 :::
 
 ## 普通 Markdown
@@ -89,8 +81,8 @@ const renderedHtml = ref('');
 const containerRef = ref<HTMLElement | null>(null);
 
 const componentMap: Record<string, Component> = {
-  Table,
-  Alert
+  table: Table,
+  alert: Alert
 };
 
 async function renderMarkdown() {
@@ -98,8 +90,8 @@ async function renderMarkdown() {
   
   mdi.use(MarkdownVueComponent, {
     components: {
-      table: 'Table',
-      alert: 'Alert'
+      table: Table,
+      alert: Alert
     }
   });
   
@@ -109,29 +101,7 @@ async function renderMarkdown() {
   if (containerRef.value) {
     containerRef.value.innerHTML = html;
     
-    const { createApp } = await import('vue');
-    const elements = containerRef.value.querySelectorAll('[data-vue-component]');
-    
-    elements.forEach((el) => {
-      const componentName = el.getAttribute('data-vue-component') || '';
-      const propsJson = el.getAttribute('data-props') || '{}';
-      
-      let props: Record<string, unknown> = {};
-      try {
-        props = JSON.parse(propsJson);
-      } catch (e) {
-        console.warn(`Failed to parse props:`, e);
-      }
-      
-      const component = componentMap[componentName];
-      
-      if (component) {
-        const mountPoint = document.createElement('div');
-        el.innerHTML = '';
-        el.appendChild(mountPoint);
-        createApp(component, props).mount(mountPoint);
-      }
-    });
+    await mountComponents(containerRef.value, componentMap);
   }
 }
 
