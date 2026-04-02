@@ -1,6 +1,7 @@
 import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
 import type { Component } from 'vue';
+import type { RuntimeController } from './runtime.js';
 
 export interface ComponentConfig {
   component: string | Component;
@@ -166,46 +167,11 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
 export async function mountComponents(
   container: HTMLElement,
   components: Record<string, string | Component | ComponentConfig>
-): Promise<void> {
-  const { createApp } = await import('vue');
-  
-  const componentMap: Record<string, Component> = {};
-  for (const [key, config] of Object.entries(components)) {
-    if (typeof config === 'string') {
-      continue;
-    } else if (typeof config === 'object' && 'component' in config) {
-      if (typeof config.component !== 'string') {
-        componentMap[key] = config.component;
-      }
-    } else {
-      componentMap[key] = config as Component;
-    }
-  }
-  
-  const elements = container.querySelectorAll('[data-vue-component]');
-  
-  elements.forEach((el) => {
-    const componentName = el.getAttribute('data-vue-component') || '';
-    const propsJson = el.getAttribute('data-props') || '{}';
-    
-    let props: Record<string, unknown> = {};
-    try {
-      props = JSON.parse(propsJson);
-    } catch (e) {
-      console.warn(`Failed to parse props for component ${componentName}:`, e);
-    }
-    
-    const component = componentMap[componentName];
-    
-    if (component) {
-      const mountPoint = document.createElement('div');
-      el.innerHTML = '';
-      el.appendChild(mountPoint);
-      const app = createApp(component, props);
-      app.mount(mountPoint);
-    }
-  });
+): Promise<RuntimeController> {
+  const runtime = await import('./runtime.js');
+  return runtime.mountComponents(container, components);
 }
 
+export type { RuntimeController };
 export { MarkdownRenderer } from './renderer.js';
 export type { MarkdownItComponentOptions } from './renderer.js';
