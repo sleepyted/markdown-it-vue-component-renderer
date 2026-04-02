@@ -94,7 +94,9 @@ function cleanupRecords(records: MountRecord[]): void {
 }
 
 function parseProps(element: Element, componentName: string): Record<string, unknown> {
-  const propsJson = element.getAttribute('data-props') || '{}';
+  const propsJson = element.getAttribute('data-vue-props')
+    ?? element.getAttribute('data-props')
+    ?? '{}';
 
   try {
     const parsed = JSON.parse(propsJson);

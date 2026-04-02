@@ -80,14 +80,11 @@ export const MarkdownRenderer = defineComponent({
       
       elements.forEach((el) => {
         const componentName = el.getAttribute('data-vue-component') || '';
-        const propsJson = el.getAttribute('data-props') || '{}';
-        
-        let componentProps: Record<string, unknown> = {};
-        try {
-          componentProps = JSON.parse(propsJson);
-        } catch (e) {
-          console.warn(`Failed to parse props for component ${componentName}:`, e);
-        }
+        const propsJson = el.getAttribute('data-vue-props')
+          ?? el.getAttribute('data-props')
+          ?? '{}';
+
+        const componentProps = parsePlaceholderProps(propsJson, componentName);
         
         const component = props.components[componentName];
         
@@ -117,3 +114,24 @@ export const MarkdownRenderer = defineComponent({
 });
 
 export default MarkdownRenderer;
+
+function parsePlaceholderProps(propsJson: string, componentName: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(propsJson);
+    if (isPlainObject(parsed)) {
+      return parsed;
+    }
+
+    console.warn(
+      `Failed to parse props for component ${componentName}: expected a plain object but got ${typeof parsed}.`
+    );
+    return {};
+  } catch (error) {
+    console.warn(`Failed to parse props for component ${componentName}:`, error);
+    return {};
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

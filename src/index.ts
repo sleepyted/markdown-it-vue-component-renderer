@@ -14,154 +14,113 @@ export interface MarkdownVueComponentOptions {
   wrapperTag?: string;
 }
 
+type ComponentEntry = {
+  componentName: string;
+  propsParser: ((content: string, tokens: Token[]) => Record<string, unknown>) | null;
+};
+
+type PlaceholderMeta = {
+  containerKey: string;
+  componentName: string;
+  inlineArgsRaw: string;
+  bodyRaw: string;
+  propsParser: ((content: string, tokens: Token[]) => Record<string, unknown>) | null;
+  contextTokens: Token[];
+};
+
 export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVueComponentOptions) {
-  const { 
-    components, 
-    containerClass = 'vue-component', 
-    wrapperTag = 'div' 
+  const {
+    components,
+    containerClass = 'vue-component',
+    wrapperTag = 'div'
   } = options;
 
-  const componentNames = Object.keys(components);
+  const componentEntries = buildComponentEntries(components);
 
-  for (const name of componentNames) {
-    const config = components[name];
-    let componentName: string;
-    let componentRef: Component | null = null;
-    let customPropsParser: ((content: string, tokens: Token[]) => Record<string, unknown>) | null = null;
-    
-    if (typeof config === 'string') {
-      componentName = config;
-    } else if (typeof config === 'object' && 'component' in config) {
-      const comp = config.component;
-      if (typeof comp === 'string') {
-        componentName = comp;
-      } else {
-        componentName = name;
-        componentRef = comp;
+  md.block.ruler.before(
+    'fence',
+    'vue_component',
+    function vueComponentRule(state, startLine, endLine, silent) {
+      const pos = state.bMarks[startLine] + state.tShift[startLine];
+      const max = state.eMarks[startLine];
+      const line = state.src.slice(pos, max);
+
+      if (!line.startsWith(':::')) {
+        return false;
       }
-      customPropsParser = config.propsParser || null;
-    } else {
-      componentName = name;
-      componentRef = config as Component;
-    }
 
-    const containerName = `vue_component_${name}`;
-    
-    md.block.ruler.before(
-      'fence',
-      containerName,
-      function containerRule(state, startLine, endLine, silent) {
-        const pos = state.bMarks[startLine] + state.tShift[startLine];
-        const max = state.eMarks[startLine];
-        const line = state.src.slice(pos, max);
+      const trimmedAfter = line.slice(3).trimStart();
+      if (!trimmedAfter) {
+        return false;
+      }
 
-        const pattern = new RegExp(`^:::${name}\\b(.*)$`);
-        const match = line.match(pattern);
-        
-        if (!match) {
-          return false;
-        }
+      const parsed = parseContainerOpen(trimmedAfter, componentEntries);
+      if (!parsed) {
+        return false;
+      }
 
-        if (silent) {
-          return true;
-        }
+      const { containerKey, inlineArgsRaw } = parsed;
+      const entry = componentEntries.get(containerKey);
+      if (!entry) {
+        return false;
+      }
 
-        let nextLine = startLine + 1;
-        const closePattern = /^:::/;
+      const closeLine = findCloseLine(state, startLine + 1, endLine);
+      if (closeLine === null) {
+        // Unclosed container: let markdown-it treat it as normal markdown.
+        return false;
+      }
 
-        while (nextLine < endLine) {
-          const linePos = state.bMarks[nextLine] + state.tShift[nextLine];
-          const lineMax = state.eMarks[nextLine];
-          const lineText = state.src.slice(linePos, lineMax);
-
-          if (closePattern.test(lineText.trim())) {
-            break;
-          }
-          nextLine++;
-        }
-
-        const openToken = state.push(`${containerName}_open`, wrapperTag, 1);
-        openToken.markup = `:::${name}`;
-        openToken.block = true;
-        openToken.meta = {
-          componentName,
-          componentRef
-        };
-        openToken.attrSet('class', `${containerClass} ${containerClass}--${name}`);
-        openToken.attrSet('data-vue-component', componentName);
-        if (componentRef) {
-          openToken.attrSet('data-vue-component-instance', 'true');
-        }
-
-        const contentLines: string[] = [];
-        for (let i = startLine + 1; i < nextLine; i++) {
-          const linePos = state.bMarks[i] + state.tShift[i];
-          const lineMax = state.eMarks[i];
-          contentLines.push(state.src.slice(linePos, lineMax));
-        }
-        
-        const rawContent = contentLines.join('\n').trim();
-        
-        let props: Record<string, unknown> = {};
-        
-        const args = match[1]?.trim() || '';
-        if (args) {
-          try {
-            props = JSON.parse(args);
-          } catch {
-            // 行内 JSON 解析失败
-          }
-        }
-        
-        if (rawContent) {
-          try {
-            const contentProps = JSON.parse(rawContent);
-            props = { ...props, ...contentProps };
-          } catch {
-            // 内容 JSON 解析失败
-          }
-        }
-        
-        if (customPropsParser) {
-          const customProps = customPropsParser(rawContent, []);
-          props = { ...props, ...customProps };
-        }
-        
-        openToken.meta.parsedProps = props;
-
-        state.line = nextLine + 1;
-
-        const closeToken = state.push(`${containerName}_close`, wrapperTag, -1);
-        closeToken.markup = ':::';
-        closeToken.block = true;
-
+      if (silent) {
         return true;
-      },
-      { alt: ['paragraph', 'reference', 'blockquote', 'list'] }
-    );
-    
-    md.renderer.rules[`${containerName}_open`] = function(tokens, idx, options, env, self) {
-      const token = tokens[idx];
-      const compName = token.meta?.componentName || name;
-      const parsedProps = token.meta?.parsedProps || {};
-      
-      const propsJson = JSON.stringify(parsedProps);
-      const escapedProps = propsJson
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+      }
 
-      const attrs = self.renderAttrs(tokens[idx]);
-      
-      return `<${wrapperTag}${attrs} data-vue-component="${compName}" data-props="${escapedProps}">`;
-    };
+      const bodyLines: string[] = [];
+      for (let lineNo = startLine + 1; lineNo < closeLine; lineNo++) {
+        const bodyPos = state.bMarks[lineNo] + state.tShift[lineNo];
+        const bodyMax = state.eMarks[lineNo];
+        bodyLines.push(state.src.slice(bodyPos, bodyMax));
+      }
 
-    md.renderer.rules[`${containerName}_close`] = function() {
-      return `</${wrapperTag}>`;
-    };
-  }
+      const token = state.push('vue_component', wrapperTag, 0);
+      token.block = true;
+      token.meta = {
+        containerKey,
+        componentName: entry.componentName,
+        inlineArgsRaw,
+        bodyRaw: bodyLines.join('\n'),
+        propsParser: entry.propsParser,
+        contextTokens: buildContextTokens(
+          state,
+          wrapperTag,
+          containerKey,
+          entry.componentName,
+          inlineArgsRaw,
+          bodyLines.join('\n')
+        )
+      } satisfies PlaceholderMeta;
+
+      state.line = closeLine + 1;
+      return true;
+    },
+    { alt: ['paragraph', 'reference', 'blockquote', 'list'] }
+  );
+
+  md.renderer.rules.vue_component = function(tokens, idx, options, env, self) {
+    const token = tokens[idx];
+    const meta = (token.meta || {}) as PlaceholderMeta;
+
+    const { props, bodyFormat } = buildPlaceholderProps(meta, meta.contextTokens);
+
+    token.attrSet('class', `${containerClass} ${containerClass}--${meta.containerKey}`);
+    token.attrSet('data-vue-component', meta.componentName);
+    token.attrSet('data-vue-props', JSON.stringify(props));
+    token.attrSet('data-vue-body', JSON.stringify(meta.bodyRaw));
+    token.attrSet('data-vue-body-format', bodyFormat);
+
+    const attrs = self.renderAttrs(token);
+    return `<${token.tag}${attrs}></${token.tag}>`;
+  };
 }
 
 export async function mountComponents(
@@ -175,3 +134,161 @@ export async function mountComponents(
 export type { RuntimeController };
 export { MarkdownRenderer } from './renderer.js';
 export type { MarkdownItComponentOptions } from './renderer.js';
+
+function buildComponentEntries(
+  components: Record<string, string | Component | ComponentConfig>
+): Map<string, ComponentEntry> {
+  const entries = new Map<string, ComponentEntry>();
+
+  for (const [key, config] of Object.entries(components)) {
+    if (typeof config === 'string') {
+      entries.set(key, { componentName: config, propsParser: null });
+      continue;
+    }
+
+    if (typeof config === 'object' && config !== null && 'component' in config) {
+      const componentName = typeof config.component === 'string' ? config.component : key;
+      entries.set(key, { componentName, propsParser: config.propsParser || null });
+      continue;
+    }
+
+    entries.set(key, { componentName: key, propsParser: null });
+  }
+
+  return entries;
+}
+
+function findCloseLine(
+  state: { bMarks: number[]; tShift: number[]; eMarks: number[]; src: string },
+  startLine: number,
+  endLine: number
+): number | null {
+  for (let lineNo = startLine; lineNo < endLine; lineNo++) {
+    const pos = state.bMarks[lineNo] + state.tShift[lineNo];
+    const max = state.eMarks[lineNo];
+    const text = state.src.slice(pos, max).trim();
+
+    if (text === ':::') {
+      return lineNo;
+    }
+  }
+
+  return null;
+}
+
+function buildPlaceholderProps(
+  meta: PlaceholderMeta,
+  tokens: Token[]
+): {
+  props: Record<string, unknown>;
+  bodyFormat: 'empty' | 'json' | 'text';
+} {
+  const inlineProps = parseJsonObject(meta.inlineArgsRaw) || {};
+
+  const bodyTrimmed = meta.bodyRaw.trim();
+  let props: Record<string, unknown> = { ...inlineProps };
+  let bodyFormat: 'empty' | 'json' | 'text' = 'empty';
+
+  if (bodyTrimmed) {
+    const bodyProps = parseJsonObject(bodyTrimmed);
+    if (bodyProps) {
+      bodyFormat = 'json';
+      props = { ...props, ...bodyProps };
+    } else {
+      bodyFormat = 'text';
+      props = { ...props, content: bodyTrimmed };
+    }
+  }
+
+  if (meta.propsParser) {
+    const parsed = meta.propsParser(meta.bodyRaw, tokens);
+    if (isPlainObject(parsed)) {
+      props = { ...props, ...parsed };
+    }
+  }
+
+  return { props, bodyFormat };
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function buildContextTokens(
+  state: { Token: new (type: string, tag: string, nesting: -1 | 0 | 1) => Token },
+  wrapperTag: string,
+  containerKey: string,
+  componentName: string,
+  inlineArgsRaw: string,
+  bodyRaw: string
+): Token[] {
+  const open = new state.Token('vue_component_open', wrapperTag, 1);
+  open.markup = `:::${containerKey}`;
+  open.meta = { containerKey, componentName, inlineArgsRaw };
+
+  const container = new state.Token('vue_component', wrapperTag, 0);
+  container.markup = `:::${containerKey}`;
+  container.meta = { containerKey, componentName };
+
+  const body = new state.Token('vue_component_body', '', 0);
+  body.content = bodyRaw;
+  body.meta = { containerKey, componentName };
+
+  const close = new state.Token('vue_component_close', wrapperTag, -1);
+  close.markup = ':::';
+  close.meta = { containerKey, componentName };
+
+  return [open, container, body, close];
+}
+
+function parseContainerOpen(
+  trimmedAfter: string,
+  componentEntries: Map<string, ComponentEntry>
+): { containerKey: string; inlineArgsRaw: string } | null {
+  // Reject "::::" which would otherwise parse as a container with ":" as the name.
+  if (trimmedAfter.startsWith(':')) {
+    return null;
+  }
+
+  const spaceIndex = trimmedAfter.search(/\s/);
+  if (spaceIndex !== -1) {
+    const containerKey = trimmedAfter.slice(0, spaceIndex);
+    const inlineArgsRaw = trimmedAfter.slice(spaceIndex).trim();
+    return componentEntries.has(containerKey) ? { containerKey, inlineArgsRaw } : null;
+  }
+
+  if (componentEntries.has(trimmedAfter)) {
+    return { containerKey: trimmedAfter, inlineArgsRaw: '' };
+  }
+
+  // Back-compat: allow inline JSON immediately after the key (e.g. ":::probe{\"a\":1}"),
+  // using a best-effort "longest registered key prefix" match.
+  const keys = Array.from(componentEntries.keys()).sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    if (!trimmedAfter.startsWith(key)) {
+      continue;
+    }
+
+    const remainder = trimmedAfter.slice(key.length);
+    if (!remainder.startsWith('{')) {
+      continue;
+    }
+
+    return { containerKey: key, inlineArgsRaw: remainder.trim() };
+  }
+
+  return null;
+}
