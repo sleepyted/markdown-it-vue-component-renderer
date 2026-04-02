@@ -187,7 +187,7 @@ async function mountComponents(
 ): Promise<RuntimeController>
 ```
 
-`mountComponents` automatically hydrates every `[data-vue-component]` placeholder by reading the `data-vue-component`, `data-vue-props`, `data-vue-body`, and `data-vue-body-format` attributes emitted by the plugin.
+`mountComponents` automatically hydrates every `[data-vue-component]` placeholder by reading the `data-vue-component` and `data-vue-props` attributes emitted by the plugin. The parser also emits `data-vue-body` and `data-vue-body-format` for custom consumers and debugging, but the runtime mount helper does not currently use those attributes directly.
 
 ```typescript
 interface RuntimeController {
@@ -197,6 +197,13 @@ interface RuntimeController {
 ```
 
 The controller lets you inspect how many components were hydrated and enables you to tear them down before replacing the HTML or when the surrounding Vue component unmounts. `destroy()` is idempotent and resets `mountedCount` to `0`.
+
+For runtime hydration, only actual Vue components are mountable:
+
+- `Component`
+- `ComponentConfig` whose `component` field is a Vue component object
+
+String-only registrations are still useful at parse time, but `mountComponents()` will warn and skip them because there is no mountable Vue component instance to create.
 
 ## Body Semantics
 
