@@ -1,18 +1,13 @@
 # markdown-it-vue-component-renderer
 
-Render Vue 3 components from `markdown-it` container blocks. This package provides a high-level `MarkdownRenderer` component for reactive content and a lower-level `mountComponents()` runtime for manual integration with an existing `markdown-it` pipeline.
+[English README](./README.md)
 
-[中文文档 / Chinese README](./README.zh-CN.md)
+把 `markdown-it` 自定义容器语法渲染成 Vue 3 组件。这个包提供两种主要用法：
 
-## Features
+- 直接使用 `MarkdownRenderer` 组件
+- 把它当作标准 `markdown-it` 插件，再配合 `mountComponents()` 手动挂载
 
-- Render custom container blocks as Vue 3 components
-- Use a drop-in `MarkdownRenderer` component for reactive content
-- Mount components manually on top of an existing `markdown-it` render flow
-- Support JSON props from inline arguments or multiline block bodies
-- Handle repeated or streaming updates with `RuntimeController`
-
-## Installation
+## 安装
 
 ```bash
 npm install markdown-it-vue-component-renderer
@@ -23,7 +18,16 @@ Peer dependencies:
 - `vue@^3`
 - `markdown-it@^14`
 
-## Recommended Usage: `MarkdownRenderer`
+## 使用方式
+
+### 方式一：`MarkdownRenderer` 组件
+
+这是推荐方式。`MarkdownRenderer` 会负责：
+
+- 渲染 Markdown
+- 识别自定义组件容器
+- 挂载对应 Vue 组件
+- 在内容频繁更新时自动清理旧挂载，避免残留实例
 
 ```vue
 <template>
@@ -40,28 +44,20 @@ import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
 const markdownContent = ref(`
-# Demo
+# 标题
 
-:::table {"title":"Users","headers":["Name","Age"],"rows":[["Alice",25],["Bob",30]]}
+:::table {"title":"用户列表","headers":["姓名","年龄"],"rows":[["张三",25]]}
 :::
 
-:::alert {"type":"warning","content":"This block is rendered as a Vue component."}
+:::alert {"type":"warning","content":"这是一条警告"}
 :::
 `);
 </script>
 ```
 
-`MarkdownRenderer` handles:
+### 方式二：`markdown-it` 插件 + `mountComponents()`
 
-- markdown rendering
-- placeholder detection
-- Vue component mounting
-- cleanup during repeated updates
-- stale async render protection
-
-## Manual Usage: `markdown-it` Plugin + `mountComponents()`
-
-Use this path when you already control the `markdown-it` lifecycle yourself.
+如果你已经有自己的 Markdown 渲染流程，也可以手动接入：
 
 ```vue
 <template>
@@ -80,7 +76,7 @@ import Alert from './components/Alert.vue';
 
 const containerRef = ref<HTMLElement | null>(null);
 const markdownContent = ref(`
-:::table {"title":"Users","headers":["Name"],"rows":[["Alice"]]}
+:::table {"title":"用户列表","headers":["姓名"],"rows":[["张三"]]}
 :::
 `);
 
@@ -123,48 +119,48 @@ onUnmounted(() => {
 </script>
 ```
 
-## Syntax
+## 语法
 
-### Inline JSON
+### 基本语法
 
 ```md
 :::componentName {"prop1":"value1","prop2":"value2"}
 :::
 ```
 
-### Multiline JSON
+### 多行 JSON
 
 ```md
 :::table
 {
-  "title": "Products",
-  "headers": ["Name", "Price", "Status"],
-  "rows": [["Item A", 100, "In stock"]],
+  "title": "产品列表",
+  "headers": ["产品", "价格", "状态"],
+  "rows": [["产品A", 100, "有库存"]],
   "striped": true
 }
 :::
 ```
 
-### Text Body
+### 文本正文
 
-When the block body is not valid JSON, the trimmed body is passed as `content`:
+如果正文不是合法 JSON，去掉首尾空白后的正文会自动作为 `content` prop：
 
 ```md
 :::alert {"type":"info"}
-This text becomes the `content` prop.
+这段文本会变成 `content` prop。
 :::
 ```
 
-### Props Merge Rules
+### Props 合并规则
 
-Props are resolved in this order:
+props 的生成顺序如下：
 
-1. Inline JSON after `:::componentName`
-2. Multiline JSON body, if the body parses as an object
-3. A trimmed `content` prop, if the body is not JSON
-4. `propsParser` output, if a component config provides one
+1. `:::componentName` 后面的行内 JSON
+2. 如果正文是 JSON object，则合并正文里的字段
+3. 如果正文不是 JSON，则把正文作为 `content`
+4. 如果组件配置了 `propsParser`，则最后合并它的返回值
 
-Later steps override earlier values.
+后面的步骤会覆盖前面的同名字段。
 
 ## API
 
@@ -191,7 +187,7 @@ interface MarkdownItComponentOptions {
 }
 ```
 
-### Plugin Options
+### 插件配置
 
 ```ts
 interface MarkdownVueComponentOptions {
@@ -206,9 +202,12 @@ interface ComponentConfig {
 }
 ```
 
-String registrations are useful when you only need to name a component during parsing, but only actual Vue component objects can be mounted at runtime.
+说明：
 
-### `mountComponents()`
+- `string` 注册适合在解析阶段标识组件名
+- 真正运行时挂载时，只有 Vue 组件对象可以被挂载
+
+### `mountComponents`
 
 ```ts
 async function mountComponents(
@@ -224,21 +223,21 @@ interface RuntimeController {
 }
 ```
 
-`mountComponents()` scans placeholder nodes with:
+`mountComponents()` 会扫描容器里的 `[data-vue-component]` 节点，并读取：
 
 - `data-vue-component`
 - `data-vue-props`
 
-The plugin also emits these attributes for inspection or custom integrations:
+插件还会额外输出下面两个属性，方便调试或自定义消费逻辑：
 
 - `data-vue-body`
 - `data-vue-body-format`
 
-## Dynamic Rendering Notes
+## 动态渲染
 
-If you call `mountComponents()` repeatedly for streaming updates, SSE-style output, or watcher-driven rerenders, keep a render token and destroy stale controllers before accepting a new render result. The manual example above shows the recommended pattern.
+如果你是手动调用 `mountComponents()` 来做流式渲染、SSE 或 `watch` 重渲染，建议使用 render token 模式避免异步串线。上面的手动示例就是推荐写法。
 
-## Development
+## 开发
 
 ```bash
 npm install
@@ -247,6 +246,6 @@ npm run build
 npm run example
 ```
 
-## License
+## 许可证
 
 [MIT](./LICENSE)
