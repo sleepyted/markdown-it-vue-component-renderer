@@ -1,6 +1,11 @@
 # markdown-it-vue-component
 
-一个 markdown-it 插件，支持将自定义容器语法转换为 Vue 3 组件。
+一个把 Markdown 自定义容器语法渲染成 Vue 3 组件的 `markdown-it` 插件。
+
+它支持两种主要用法：
+
+- 直接使用 `MarkdownRenderer` 组件
+- 把它当成普通 `markdown-it` 插件，再用 `mountComponents()` 手动挂载
 
 ## 安装
 
@@ -10,9 +15,14 @@ npm install markdown-it-vue-component
 
 ## 使用方式
 
-### 方式一：MarkdownRenderer 组件（推荐）
+### 方式一：`MarkdownRenderer` 组件
 
-直接在 Vue 组件中使用，自动处理组件挂载：
+这是推荐方式。`MarkdownRenderer` 会负责：
+
+- 渲染 Markdown
+- 识别自定义组件容器
+- 挂载对应 Vue 组件
+- 在内容频繁更新时自动清理旧挂载，避免残留实例
 
 ```vue
 <template>
@@ -22,7 +32,7 @@ npm install markdown-it-vue-component
   />
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue';
 import { MarkdownRenderer } from 'markdown-it-vue-component';
 import Table from './components/Table.vue';
@@ -31,40 +41,41 @@ import Alert from './components/Alert.vue';
 const markdownContent = ref(`
 # 标题
 
-:::table {"title": "用户列表", "headers": ["姓名", "年龄"], "rows": [["张三", 25]]}
+:::table {"title":"用户列表","headers":["姓名","年龄"],"rows":[["张三",25]]}
 :::
 
-:::alert {"type": "warning", "content": "这是一条警告"}
+:::alert {"type":"warning","content":"这是一条警告"}
 :::
 `);
 </script>
 ```
 
-### 方式二：markdown-it 插件 + mountComponents
+### 方式二：`markdown-it` 插件 + `mountComponents`
 
-作为标准 markdown-it 插件使用，配合 `mountComponents` 辅助函数自动挂载：
+如果你已经有自己的 Markdown 渲染流程，也可以手动接入：
 
 ```vue
 <template>
   <div ref="containerRef"></div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
-import MarkdownVueComponent, { mountComponents } from 'markdown-it-vue-component';
-import type { RuntimeController } from 'markdown-it-vue-component';
+import MarkdownVueComponent, {
+  mountComponents,
+  type RuntimeController
+} from 'markdown-it-vue-component';
 import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
-const containerRef = ref(null);
+const containerRef = ref<HTMLElement | null>(null);
 const markdownContent = ref(`
-:::table {"title": "用户列表", "headers": ["姓名"], "rows": [["张三"]]}
+:::table {"title":"用户列表","headers":["姓名"],"rows":[["张三"]]}
 :::
 `);
 
 const components = { table: Table, alert: Alert };
-
 const mdi = new MarkdownIt({ html: true });
 mdi.use(MarkdownVueComponent, { components });
 
@@ -74,6 +85,7 @@ let activeRenderToken = 0;
 
 async function renderMarkdown() {
   if (!containerRef.value) return;
+
   const renderId = ++renderToken;
   activeRenderToken = renderId;
 
@@ -94,6 +106,7 @@ async function renderMarkdown() {
 
 onMounted(renderMarkdown);
 watch(markdownContent, renderMarkdown);
+
 onUnmounted(() => {
   activeRenderToken = ++renderToken;
   controller?.destroy();
@@ -105,67 +118,83 @@ onUnmounted(() => {
 
 ### 基本语法
 
-```
-:::componentName {"prop1": "value1", "prop2": "value2"}
+```md
+:::componentName {"prop1":"value1","prop2":"value2"}
 :::
 ```
 
-### 示例
+### 多行 JSON
 
-#### 单行 JSON
-
-```
-:::table {"title": "用户列表", "headers": ["姓名", "年龄", "城市"], "rows": [["张三", 25, "北京"], ["李四", 30, "上海"]], "striped": true}
-:::
-```
-
-#### 多行 JSON
-
-```
+```md
 :::table
 {
   "title": "产品列表",
   "headers": ["产品", "价格", "状态"],
   "rows": [["产品A", 100, "库存充足"]],
-  "striped": true,
-  "bordered": true
+  "striped": true
 }
 :::
 ```
 
-#### Alert 组件
+### 非 JSON 正文
 
-```
-:::alert {"type": "warning", "title": "注意事项", "content": "这是警告内容"}
+如果正文不是 JSON，对应文本会自动传给组件的 `content` prop：
+
+```md
+:::alert {"type":"info"}
+这是一段普通文本
 :::
 ```
 
+### 兼容写法
+
+当前实现也兼容“组件名后面紧跟 JSON”的写法：
+
+```md
+:::alert{"type":"warning"}
+:::
+```
+
+## 正文语义
+
+组件容器的 props 生成规则如下：
+
+1. 行内 JSON 先作为基础 props。
+2. 如果块正文是 JSON object，则合并进 props，并覆盖同名行内字段。
+3. 如果块正文不是 JSON，则把去掉首尾空白后的正文放到 `content` prop。
+4. 如果提供了 `propsParser`，它会在最后执行，拿到原始正文字符串和当前容器的 token 上下文，它返回的字段优先级最高。
+
 ## API
 
-### MarkdownRenderer Props
+### `MarkdownRenderer`
 
-| 属性 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| content | `string` | 是 | Markdown 内容 |
-| components | `Record<string, Component>` | 是 | 组件映射表 |
-| mdOptions | `MarkdownItComponentOptions` | 否 | markdown-it 配置 |
-| tag | `string` | 否 | 容器标签，默认 `div` |
+```ts
+interface MarkdownRendererProps {
+  content: string;
+  components: Record<string, Component>;
+  mdOptions?: MarkdownItComponentOptions;
+}
+```
 
-### MarkdownItComponentOptions
+`MarkdownRenderer` 额外支持：
 
-```typescript
+- `tag?: string`，默认为 `div`
+
+### `MarkdownItComponentOptions`
+
+```ts
 interface MarkdownItComponentOptions {
-  html?: boolean;           // 默认 true
-  linkify?: boolean;        // 默认 true
-  typographer?: boolean;    // 默认 true
-  containerClass?: string;  // 默认 'vue-component'
-  wrapperTag?: string;      // 默认 'div'
+  html?: boolean;          // 默认 true
+  linkify?: boolean;       // 默认 true
+  typographer?: boolean;   // 默认 true
+  containerClass?: string; // 默认 "vue-component"
+  wrapperTag?: string;     // 默认 "div"
 }
 ```
 
 ### 插件配置
 
-```typescript
+```ts
 interface MarkdownVueComponentOptions {
   components: Record<string, string | Component | ComponentConfig>;
   containerClass?: string;
@@ -178,42 +207,48 @@ interface ComponentConfig {
 }
 ```
 
-### mountComponents function
+说明：
 
-```typescript
+- `string` 注册适合解析阶段标识组件名。
+- 真正运行时挂载时，只有 Vue 组件对象是可挂载的。
+- 如果传入字符串注册给 `mountComponents()`，运行时会发出警告并跳过该占位节点。
+
+### `mountComponents`
+
+```ts
 async function mountComponents(
   container: HTMLElement,
   components: Record<string, string | Component | ComponentConfig>
 ): Promise<RuntimeController>
 ```
 
-`mountComponents` automatically hydrates every `[data-vue-component]` placeholder by reading the `data-vue-component` and `data-vue-props` attributes emitted by the plugin. The parser also emits `data-vue-body` and `data-vue-body-format` for custom consumers and debugging, but the runtime mount helper does not currently use those attributes directly.
-
-```typescript
+```ts
 interface RuntimeController {
-  mountedCount: number; // placeholders successfully mounted during this call
-  destroy(): void;      // unmounts the Vue apps and removes their mount points
+  mountedCount: number;
+  destroy(): void;
 }
 ```
 
-The controller lets you inspect how many components were hydrated and enables you to tear them down before replacing the HTML or when the surrounding Vue component unmounts. `destroy()` is idempotent and resets `mountedCount` to `0`.
+`mountComponents()` 会扫描容器内的 `[data-vue-component]` 节点，并读取：
 
-For runtime hydration, only actual Vue components are mountable:
+- `data-vue-component`
+- `data-vue-props`
 
-- `Component`
-- `ComponentConfig` whose `component` field is a Vue component object
+插件还会输出下面两个属性，供调试或自定义消费逻辑使用，但默认 runtime 不直接依赖它们：
 
-String-only registrations are still useful at parse time, but `mountComponents()` will warn and skip them because there is no mountable Vue component instance to create.
+- `data-vue-body`
+- `data-vue-body-format`
 
-## Body Semantics
+`RuntimeController` 的作用：
 
-- Inline JSON immediately after the container key (e.g. `:::alert {"type":"warning"}`) becomes the base props object.
-- The block body is preserved verbatim on `data-vue-body`. If it parses as JSON, it merges into the props and overrides the inline JSON; otherwise the trimmed text is copied to the `content` prop so freeform text survives.
-- `data-vue-body-format` records whether the body was `empty`, `json`, or `text`, and `ComponentConfig.propsParser` always receives the raw body string plus the token context so you can reparse it with no implicit trimming.
+- `mountedCount`：本次成功挂载的组件数量
+- `destroy()`：卸载当前 controller 管理的所有 Vue app，并移除它们的挂载点
 
-## Dynamic Rendering
+`destroy()` 是幂等的，可以安全重复调用。
 
-When you manually rerender markdown (streaming, SSE, `watch`), guard the asynchronous mount by tracking a render ID. Only the latest render should keep its controller; stale renders destroy themselves. A typical pattern is:
+## 动态渲染
+
+如果你是手动调用 `mountComponents()` 做流式渲染、SSE、`watch` 重渲染，建议使用“render token”模式避免异步串线：
 
 ```ts
 let controller: RuntimeController | null = null;
@@ -245,32 +280,30 @@ onUnmounted(() => {
 });
 ```
 
-`RuntimeController.mountedCount` is also handy for checking whether the latest render produced any placeholders to hydrate. Streaming helpers such as `<MarkdownRenderer />` still work because they encapsulate this cleanup pattern internally.
+如果你直接使用 `<MarkdownRenderer />`，这些清理和失效保护已经内建。
 
-```vue
-<template>
-  <MarkdownRenderer
-    :content="dynamicContent"
-    :components="components"
-  />
-</template>
+## 占位属性
 
-<script setup>
-import { ref } from 'vue';
-import { MarkdownRenderer } from 'markdown-it-vue-component';
+插件输出的占位节点大致如下：
 
-const dynamicContent = ref('');
-
-// 模拟 SSE 流式输出
-function appendContent(chunk) {
-  dynamicContent.value += chunk;
-}
-</script>
+```html
+<div
+  class="vue-component vue-component--alert"
+  data-vue-component="alert"
+  data-vue-props="{&quot;type&quot;:&quot;warning&quot;}"
+  data-vue-body="&quot;raw body text&quot;"
+  data-vue-body-format="text"
+></div>
 ```
 
-## 组件示例
+其中：
 
-### Table 组件
+- `data-vue-props` 是 runtime 默认读取的 props 数据
+- `data-vue-body-format` 可能是 `empty`、`json` 或 `text`
+
+## 示例组件
+
+### Table
 
 ```vue
 <template>
@@ -300,7 +333,7 @@ defineProps({
 </script>
 ```
 
-### Alert 组件
+### Alert
 
 ```vue
 <template>
@@ -322,13 +355,9 @@ defineProps({
 ## 开发
 
 ```bash
-# 安装依赖
 npm install
-
-# 构建
+npm test
 npm run build
-
-# 运行示例
 npm run example
 ```
 

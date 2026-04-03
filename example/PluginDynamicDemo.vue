@@ -145,10 +145,13 @@ async function renderContent() {
 
 const startStream = () => {
   if (isStreaming.value) return;
-  
+
+  if (dynamicContent.value || currentIndex !== 0) {
+    resetContent();
+  }
+
   isStreaming.value = true;
-  currentIndex = 0;
-  
+
   streamInterval = window.setInterval(async () => {
     if (currentIndex < streamChunks.length) {
       dynamicContent.value += streamChunks[currentIndex];

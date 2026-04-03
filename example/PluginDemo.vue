@@ -1,42 +1,52 @@
 <template>
   <div>
     <h1>标准 markdown-it 插件使用示例</h1>
-    
+
     <div class="demo-section">
       <h2>使用方式</h2>
       <pre><code>import MarkdownIt from 'markdown-it';
-import MarkdownVueComponent, { mountComponents } from 'markdown-it-vue-component';
-import Table from './Table.vue';
-import Alert from './Alert.vue';
+import MarkdownVueComponent, {
+  mountComponents,
+  type RuntimeController
+} from 'markdown-it-vue-component';
+import Table from './components/Table.vue';
+import Alert from './components/Alert.vue';
 
-const mdi = new MarkdownIt();
-mdi.use(MarkdownVueComponent, {
-  components: {
-    table: Table,    // 直接传入 Vue 组件
-    alert: Alert     // 直接传入 Vue 组件
-  }
-});
+const components = { table: Table, alert: Alert };
+const mdi = new MarkdownIt({ html: true });
+mdi.use(MarkdownVueComponent, { components });
+
+let controller: RuntimeController | null = null;
+let renderToken = 0;
+let activeRenderToken = 0;
+
+const renderId = ++renderToken;
+activeRenderToken = renderId;
+controller?.destroy();
+controller = null;
 
 const html = mdi.render(markdownContent);
 container.innerHTML = html;
 
-// 使用 mountComponents 辅助函数自动挂载
-await mountComponents(container, {
-  table: Table,
-  alert: Alert
-});</code></pre>
+const nextController = await mountComponents(container, components);
+if (activeRenderToken !== renderId) {
+  nextController.destroy();
+  return;
+}
+
+controller = nextController;</code></pre>
     </div>
-    
+
     <div class="demo-section">
       <h2>Markdown 源码</h2>
       <pre><code>{{ markdownContent }}</code></pre>
     </div>
-    
+
     <div class="demo-section">
       <h2>渲染后的 HTML</h2>
       <pre class="html-output"><code>{{ renderedHtml }}</code></pre>
     </div>
-    
+
     <div class="demo-section">
       <h2>最终渲染结果</h2>
       <div class="markdown-content" ref="containerRef"></div>
@@ -45,28 +55,29 @@ await mountComponents(container, {
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, type Component } from 'vue';
+import { onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import MarkdownIt from 'markdown-it';
 import MarkdownVueComponent, { mountComponents } from '../src/index';
-import Table from './components/Table.vue';
+import type { RuntimeController } from '../src/index';
 import Alert from './components/Alert.vue';
+import Table from './components/Table.vue';
 
 const markdownContent = ref(`
 # 标准插件使用示例
 
-这个示例展示了如何作为标准 markdown-it 插件使用，配合 \`mountComponents\` 辅助函数自动挂载 Vue 组件。
+这个示例展示了如何把本库当作标准 \`markdown-it\` 插件使用，并配合 \`mountComponents()\` 手动挂载 Vue 组件。
 
 ## 表格组件
 
 :::table {"title": "用户列表", "headers": ["姓名", "年龄", "城市"], "rows": [["张三", 25, "北京"], ["李四", 30, "上海"]], "striped": true}
 :::
 
-## 警告组件
+## 提示组件
 
-:::alert {"type": "info", "title": "提示", "content": "使用 mountComponents 辅助函数自动挂载"}
+:::alert {"type": "info", "title": "提示", "content": "手动挂载时要保存 RuntimeController，并在重渲染前先销毁旧实例。"}
 :::
 
-:::alert {"type": "success", "content": "无需手动处理组件挂载逻辑"}
+:::alert {"type": "success", "content": "这样可以避免旧渲染残留在容器中。"}
 :::
 
 ## 普通 Markdown
@@ -85,24 +96,37 @@ const componentMap: Record<string, Component> = {
   alert: Alert
 };
 
+const mdi = new MarkdownIt({ html: true });
+mdi.use(MarkdownVueComponent, {
+  components: componentMap
+});
+
+let mountedController: RuntimeController | null = null;
+let renderToken = 0;
+let activeRenderToken = 0;
+
 async function renderMarkdown() {
-  const mdi = new MarkdownIt({ html: true });
-  
-  mdi.use(MarkdownVueComponent, {
-    components: {
-      table: Table,
-      alert: Alert
-    }
-  });
-  
+  if (!containerRef.value) {
+    return;
+  }
+
+  const renderId = ++renderToken;
+  activeRenderToken = renderId;
+
+  mountedController?.destroy();
+  mountedController = null;
+
   const html = mdi.render(markdownContent.value);
   renderedHtml.value = html;
-  
-  if (containerRef.value) {
-    containerRef.value.innerHTML = html;
-    
-    await mountComponents(containerRef.value, componentMap);
+  containerRef.value.innerHTML = html;
+
+  const nextController = await mountComponents(containerRef.value, componentMap);
+  if (activeRenderToken !== renderId) {
+    nextController.destroy();
+    return;
   }
+
+  mountedController = nextController;
 }
 
 onMounted(() => {
@@ -110,6 +134,12 @@ onMounted(() => {
 });
 
 watch(markdownContent, renderMarkdown);
+
+onUnmounted(() => {
+  activeRenderToken = ++renderToken;
+  mountedController?.destroy();
+  mountedController = null;
+});
 </script>
 
 <style scoped>
