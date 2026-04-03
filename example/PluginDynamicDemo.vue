@@ -6,17 +6,34 @@
       <h2>使用方式</h2>
       <pre><code>import MarkdownIt from 'markdown-it';
 import MarkdownVueComponent, { mountComponents } from 'markdown-it-vue-component';
+import type { RuntimeController } from 'markdown-it-vue-component';
 
-const mdi = new MarkdownIt();
+const mdi = new MarkdownIt({ html: true });
 mdi.use(MarkdownVueComponent, { components });
+
+let controller: RuntimeController | null = null;
+let renderToken = 0;
+let activeRenderToken = 0;
 
 // 动态更新内容
 dynamicContent.value += chunk;
 
 // 重新渲染并挂载
+const renderId = ++renderToken;
+activeRenderToken = renderId;
+controller?.destroy();
+controller = null;
+
 const html = mdi.render(dynamicContent.value);
 container.innerHTML = html;
-await mountComponents(container, components);</code></pre>
+
+const nextController = await mountComponents(container, components);
+if (activeRenderToken !== renderId) {
+  nextController.destroy();
+  return;
+}
+
+controller = nextController;</code></pre>
     </div>
     
     <div class="demo-section">
@@ -49,6 +66,7 @@ await mountComponents(container, components);</code></pre>
 import { ref, onUnmounted, type Component } from 'vue';
 import MarkdownIt from 'markdown-it';
 import MarkdownVueComponent, { mountComponents } from '../src/index';
+import type { RuntimeController } from '../src/index';
 import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
@@ -57,6 +75,13 @@ const isStreaming = ref(false);
 const containerRef = ref<HTMLElement | null>(null);
 let streamInterval: number | null = null;
 let currentIndex = 0;
+let mountedController: RuntimeController | null = null;
+let renderToken = 0;
+let activeRenderToken = 0;
+
+function markPendingRenderStale() {
+  activeRenderToken = ++renderToken;
+}
 
 const components: Record<string, Component> = {
   table: Table,
@@ -98,10 +123,24 @@ const streamChunks = [
 async function renderContent() {
   if (!containerRef.value) return;
   
+  const renderId = ++renderToken;
+  activeRenderToken = renderId;
+
+  if (mountedController) {
+    mountedController.destroy();
+    mountedController = null;
+  }
+
   const html = mdi.render(dynamicContent.value);
   containerRef.value.innerHTML = html;
   
-  await mountComponents(containerRef.value, components);
+  const nextController = await mountComponents(containerRef.value, components);
+  if (activeRenderToken !== renderId) {
+    nextController.destroy();
+    return;
+  }
+
+  mountedController = nextController;
 }
 
 const startStream = () => {
@@ -133,13 +172,23 @@ const resetContent = () => {
   stopStream();
   dynamicContent.value = '';
   currentIndex = 0;
+  if (mountedController) {
+    mountedController.destroy();
+    mountedController = null;
+  }
+  markPendingRenderStale();
   if (containerRef.value) {
     containerRef.value.innerHTML = '';
   }
 };
 
 onUnmounted(() => {
+  markPendingRenderStale();
   stopStream();
+  if (mountedController) {
+    mountedController.destroy();
+    mountedController = null;
+  }
 });
 </script>
 

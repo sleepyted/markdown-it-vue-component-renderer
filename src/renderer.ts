@@ -1,6 +1,17 @@
-import { defineComponent, h, ref, watch, onMounted, shallowRef, type Component, type PropType } from 'vue';
+import {
+  defineComponent,
+  h,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+  type Component,
+  type PropType
+} from 'vue';
 import MarkdownIt from 'markdown-it';
 import MarkdownVueComponent, { type MarkdownVueComponentOptions } from './index.js';
+import { mountComponents, type RuntimeController } from './runtime.js';
 
 export interface MarkdownRendererProps {
   content: string;
@@ -36,20 +47,23 @@ export const MarkdownRenderer = defineComponent({
   },
   setup(props) {
     const containerRef = ref<HTMLElement | null>(null);
-    const mountedApps = shallowRef<Array<{ app: any; mountPoint: HTMLElement }>>([]);
+    const controllerRef = shallowRef<RuntimeController | null>(null);
+    let renderSequence = 0;
 
-    const cleanupMountedApps = () => {
-      mountedApps.value.forEach(({ app, mountPoint }) => {
-        app.unmount();
-        mountPoint.remove();
-      });
-      mountedApps.value = [];
+    const destroyController = () => {
+      controllerRef.value?.destroy();
+      controllerRef.value = null;
     };
 
     const renderMarkdown = async () => {
-      if (!containerRef.value) return;
-      
-      cleanupMountedApps();
+      const container = containerRef.value;
+      if (!container) {
+        return;
+      }
+
+      const sequence = ++renderSequence;
+
+      destroyController();
       
       const { html, linkify, typographer, containerClass, wrapperTag } = props.mdOptions;
       
@@ -60,7 +74,7 @@ export const MarkdownRenderer = defineComponent({
       });
       
       const componentMappings: Record<string, string> = {};
-      Object.keys(props.components).forEach(name => {
+      Object.keys(props.components).forEach((name) => {
         componentMappings[name] = name;
       });
       
@@ -71,46 +85,30 @@ export const MarkdownRenderer = defineComponent({
       });
       
       const htmlContent = mdi.render(props.content);
-      containerRef.value.innerHTML = htmlContent;
-      
-      const { createApp } = await import('vue');
-      const elements = containerRef.value.querySelectorAll('[data-vue-component]');
-      
-      const newMountedApps: Array<{ app: any; mountPoint: HTMLElement }> = [];
-      
-      elements.forEach((el) => {
-        const componentName = el.getAttribute('data-vue-component') || '';
-        const propsJson = el.getAttribute('data-props') || '{}';
-        
-        let componentProps: Record<string, unknown> = {};
-        try {
-          componentProps = JSON.parse(propsJson);
-        } catch (e) {
-          console.warn(`Failed to parse props for component ${componentName}:`, e);
-        }
-        
-        const component = props.components[componentName];
-        
-        if (component) {
-          const mountPoint = document.createElement('div');
-          el.innerHTML = '';
-          el.appendChild(mountPoint);
-          const app = createApp(component, componentProps);
-          app.mount(mountPoint);
-          newMountedApps.push({ app, mountPoint });
-        }
-      });
-      
-      mountedApps.value = newMountedApps;
+      container.innerHTML = htmlContent;
+
+      const controller = await mountComponents(container, props.components);
+      if (sequence !== renderSequence) {
+        controller.destroy();
+        return;
+      }
+
+      controllerRef.value = controller;
     };
 
     onMounted(() => {
-      renderMarkdown();
+      void renderMarkdown();
     });
 
-    watch(() => props.content, renderMarkdown);
-    watch(() => props.components, renderMarkdown, { deep: true });
-    watch(() => props.mdOptions, renderMarkdown, { deep: true });
+    watch(() => props.content, () => void renderMarkdown());
+    watch(() => props.components, () => void renderMarkdown(), { deep: true });
+    watch(() => props.mdOptions, () => void renderMarkdown(), { deep: true });
+
+    onBeforeUnmount(() => {
+      // Invalidate any in-flight async render before destroying the active mounts.
+      renderSequence += 1;
+      destroyController();
+    });
 
     return () => h(props.tag, { ref: containerRef, class: 'markdown-renderer' });
   }

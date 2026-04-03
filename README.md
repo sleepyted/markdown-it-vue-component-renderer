@@ -50,9 +50,10 @@ const markdownContent = ref(`
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import MarkdownVueComponent, { mountComponents } from 'markdown-it-vue-component';
+import type { RuntimeController } from 'markdown-it-vue-component';
 import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
@@ -64,24 +65,39 @@ const markdownContent = ref(`
 
 const components = { table: Table, alert: Alert };
 
+const mdi = new MarkdownIt({ html: true });
+mdi.use(MarkdownVueComponent, { components });
+
+let controller: RuntimeController | null = null;
+let renderToken = 0;
+let activeRenderToken = 0;
+
 async function renderMarkdown() {
-  const mdi = new MarkdownIt({ html: true });
-  
-  // 使用插件，直接传入 Vue 组件
-  mdi.use(MarkdownVueComponent, {
-    components
-  });
-  
-  // 渲染 HTML
+  if (!containerRef.value) return;
+  const renderId = ++renderToken;
+  activeRenderToken = renderId;
+
+  controller?.destroy();
+  controller = null;
+
   const html = mdi.render(markdownContent.value);
   containerRef.value.innerHTML = html;
-  
-  // 使用 mountComponents 辅助函数自动挂载 Vue 组件
-  await mountComponents(containerRef.value, components);
+
+  const nextController = await mountComponents(containerRef.value, components);
+  if (activeRenderToken !== renderId) {
+    nextController.destroy();
+    return;
+  }
+
+  controller = nextController;
 }
 
 onMounted(renderMarkdown);
 watch(markdownContent, renderMarkdown);
+onUnmounted(() => {
+  activeRenderToken = ++renderToken;
+  controller?.destroy();
+});
 </script>
 ```
 
@@ -162,20 +178,74 @@ interface ComponentConfig {
 }
 ```
 
-### mountComponents 函数
+### mountComponents function
 
 ```typescript
 async function mountComponents(
   container: HTMLElement,
   components: Record<string, string | Component | ComponentConfig>
-): Promise<void>
+): Promise<RuntimeController>
 ```
 
-自动扫描容器中的 `[data-vue-component]` 元素并挂载对应的 Vue 组件。
+`mountComponents` automatically hydrates every `[data-vue-component]` placeholder by reading the `data-vue-component` and `data-vue-props` attributes emitted by the plugin. The parser also emits `data-vue-body` and `data-vue-body-format` for custom consumers and debugging, but the runtime mount helper does not currently use those attributes directly.
 
-## 动态渲染
+```typescript
+interface RuntimeController {
+  mountedCount: number; // placeholders successfully mounted during this call
+  destroy(): void;      // unmounts the Vue apps and removes their mount points
+}
+```
 
-支持内容动态更新，适用于 SSE 流式输出场景：
+The controller lets you inspect how many components were hydrated and enables you to tear them down before replacing the HTML or when the surrounding Vue component unmounts. `destroy()` is idempotent and resets `mountedCount` to `0`.
+
+For runtime hydration, only actual Vue components are mountable:
+
+- `Component`
+- `ComponentConfig` whose `component` field is a Vue component object
+
+String-only registrations are still useful at parse time, but `mountComponents()` will warn and skip them because there is no mountable Vue component instance to create.
+
+## Body Semantics
+
+- Inline JSON immediately after the container key (e.g. `:::alert {"type":"warning"}`) becomes the base props object.
+- The block body is preserved verbatim on `data-vue-body`. If it parses as JSON, it merges into the props and overrides the inline JSON; otherwise the trimmed text is copied to the `content` prop so freeform text survives.
+- `data-vue-body-format` records whether the body was `empty`, `json`, or `text`, and `ComponentConfig.propsParser` always receives the raw body string plus the token context so you can reparse it with no implicit trimming.
+
+## Dynamic Rendering
+
+When you manually rerender markdown (streaming, SSE, `watch`), guard the asynchronous mount by tracking a render ID. Only the latest render should keep its controller; stale renders destroy themselves. A typical pattern is:
+
+```ts
+let controller: RuntimeController | null = null;
+let renderToken = 0;
+let activeRenderToken = 0;
+
+async function renderMarkdown() {
+  const renderId = ++renderToken;
+  activeRenderToken = renderId;
+
+  controller?.destroy();
+  controller = null;
+
+  const html = mdi.render(dynamicContent.value);
+  containerRef.value!.innerHTML = html;
+
+  const nextController = await mountComponents(containerRef.value!, components);
+  if (activeRenderToken !== renderId) {
+    nextController.destroy();
+    return;
+  }
+
+  controller = nextController;
+}
+
+onUnmounted(() => {
+  activeRenderToken = ++renderToken;
+  controller?.destroy();
+});
+```
+
+`RuntimeController.mountedCount` is also handy for checking whether the latest render produced any placeholders to hydrate. Streaming helpers such as `<MarkdownRenderer />` still work because they encapsulate this cleanup pattern internally.
 
 ```vue
 <template>
