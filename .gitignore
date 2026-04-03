@@ -33,3 +33,6 @@ npm-debug.log*
 
 # Test coverage
 coverage/
+
+# Local docs
+docs/
