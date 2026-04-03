@@ -1,27 +1,48 @@
 {
-  "name": "markdown-it-vue-component",
-  "version": "1.0.0",
-  "description": "A markdown-it plugin that replaces custom tokens with Vue 3 components",
+  "name": "markdown-it-vue-component-renderer",
+  "version": "0.1.0",
+  "description": "Render Vue 3 components from markdown-it container blocks with a ready-to-use MarkdownRenderer or manual runtime mounting.",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "files": [
     "dist"
   ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc",
     "dev": "tsc --watch",
     "example": "vite",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "npm test && npm run build",
+    "prepublishOnly": "npm test && npm run build"
   },
   "keywords": [
     "markdown-it",
+    "markdown-it-plugin",
+    "markdown",
+    "vue",
     "vue3",
-    "component",
-    "plugin"
+    "vue-component",
+    "renderer"
   ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sleepyted/markdown-it-vue-component-renderer.git"
+  },
+  "homepage": "https://github.com/sleepyted/markdown-it-vue-component-renderer#readme",
+  "bugs": {
+    "url": "https://github.com/sleepyted/markdown-it-vue-component-renderer/issues"
+  },
   "peerDependencies": {
     "markdown-it": "^14.0.0",
     "vue": "^3.0.0"
@@ -30,12 +51,12 @@
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.0.0",
     "@vitejs/plugin-vue": "^5.0.0",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^29.0.1",
     "markdown-it": "^14.1.0",
     "typescript": "^5.0.0",
     "vite": "^5.0.0",
     "vue": "^3.4.0",
-    "vitest": "^4.1.2",
-    "jsdom": "^29.0.1",
-    "@vue/test-utils": "^2.4.6"
+    "vitest": "^4.1.2"
   }
 }
