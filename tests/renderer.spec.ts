@@ -83,6 +83,24 @@ describe('MarkdownRenderer compatibility', () => {
     expect(wrapper.find('.test-probe-content').text()).toBe('hello from renderer');
   });
 
+  test('passes syntax options through mdOptions', async () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: {
+        content: '@@@probe\nhello from renderer\n@@@',
+        components: { probe: TestProbe },
+        mdOptions: {
+          syntax: {
+            marker: '@@@'
+          }
+        }
+      }
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find('.test-probe-content').text()).toBe('hello from renderer');
+  });
+
   test('warns and falls back to {} when placeholder props JSON is not a plain object', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

@@ -66,6 +66,7 @@ export const MarkdownRenderer = defineComponent({
       destroyController();
       
       const { html, linkify, typographer, containerClass, wrapperTag } = props.mdOptions;
+      const { syntax } = props.mdOptions;
       
       const mdi = new MarkdownIt({
         html: html ?? true,
@@ -81,7 +82,8 @@ export const MarkdownRenderer = defineComponent({
       mdi.use(MarkdownVueComponent, {
         components: componentMappings,
         containerClass,
-        wrapperTag
+        wrapperTag,
+        syntax
       });
       
       const htmlContent = mdi.render(props.content);

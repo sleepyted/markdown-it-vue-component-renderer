@@ -1,9 +1,9 @@
-<template>
+﻿<template>
   <div>
-    <h1>Markdown-it Vue Component Plugin Demo</h1>
-    
+    <h1>MarkdownRenderer Demo</h1>
+
     <div class="demo-section">
-      <h2>使用方式</h2>
+      <h2>Usage</h2>
       <pre><code>import { MarkdownRenderer } from 'markdown-it-vue-component';
 import Table from './Table.vue';
 import Alert from './Alert.vue';
@@ -13,14 +13,14 @@ import Alert from './Alert.vue';
   :components="{ table: Table, alert: Alert }"
 /&gt;</code></pre>
     </div>
-    
+
     <div class="demo-section">
-      <h2>Markdown 源码</h2>
+      <h2>Markdown Source</h2>
       <pre><code>{{ markdownContent }}</code></pre>
     </div>
-    
+
     <div class="demo-section">
-      <h2>渲染结果</h2>
+      <h2>Rendered Result</h2>
       <MarkdownRenderer
         :content="markdownContent"
         :components="registeredComponents"
@@ -32,34 +32,34 @@ import Alert from './Alert.vue';
 <script setup lang="ts">
 import { ref } from 'vue';
 import { MarkdownRenderer } from '../src/index';
-import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
+import Table from './components/Table.vue';
 
 const markdownContent = ref(`
-# Markdown Vue Component 示例
+# MarkdownRenderer Demo
 
-这是一个演示如何使用自定义容器语法将 Markdown 内容转换为 Vue 组件的示例。
+This example shows how to convert custom markdown containers into Vue components with the high-level MarkdownRenderer API.
 
-## 表格组件示例
+## Table examples
 
-### 方式一：JSON 在标签后
+### Inline JSON after the container name
 
 \`\`\`
-:::table {"title": "用户列表", "headers": ["姓名", "年龄", "城市"], "rows": [["张三", 25, "北京"], ["李四", 30, "上海"], ["王五", 28, "广州"]], "striped": true}
+:::table {"title": "Users", "headers": ["Name", "Age", "City"], "rows": [["Alice", 25, "Beijing"], ["Bob", 30, "Shanghai"], ["Carol", 28, "Guangzhou"]], "striped": true}
 :::
 \`\`\`
 
-:::table {"title": "用户列表", "headers": ["姓名", "年龄", "城市"], "rows": [["张三", 25, "北京"], ["李四", 30, "上海"], ["王五", 28, "广州"]], "striped": true}
+:::table {"title": "Users", "headers": ["Name", "Age", "City"], "rows": [["Alice", 25, "Beijing"], ["Bob", 30, "Shanghai"], ["Carol", 28, "Guangzhou"]], "striped": true}
 :::
 
-### 方式二：JSON 在内容中
+### JSON in the block body
 
 \`\`\`
 :::table
 {
-  "title": "产品列表",
-  "headers": ["产品", "价格", "状态"],
-  "rows": [["产品A", 100, "库存充足"], ["产品B", 200, "库存紧张"]],
+  "title": "Products",
+  "headers": ["Product", "Price", "Status"],
+  "rows": [["Product A", 100, "In stock"], ["Product B", 200, "Low stock"]],
   "striped": true,
   "bordered": true
 }
@@ -68,37 +68,37 @@ const markdownContent = ref(`
 
 :::table
 {
-  "title": "产品列表",
-  "headers": ["产品", "价格", "状态"],
-  "rows": [["产品A", 100, "库存充足"], ["产品B", 200, "库存紧张"]],
+  "title": "Products",
+  "headers": ["Product", "Price", "Status"],
+  "rows": [["Product A", 100, "In stock"], ["Product B", 200, "Low stock"]],
   "striped": true,
   "bordered": true
 }
 :::
 
-## 警告组件示例
+## Alert examples
 
-:::alert {"type": "warning", "title": "注意事项", "content": "这是一个警告提示，用于提醒用户重要信息。"}
+:::alert {"type": "warning", "title": "Heads up", "content": "This alert highlights an important warning for the reader."}
 :::
 
-:::alert {"type": "success", "title": "操作成功", "content": "您的数据已成功保存！"}
+:::alert {"type": "success", "title": "Saved", "content": "Your data was saved successfully."}
 :::
 
-:::alert {"type": "info", "content": "这是一条普通的信息提示。"}
+:::alert {"type": "info", "content": "Standard markdown content and Vue components can live together."}
 :::
 
-## 普通 Markdown 内容
+## Plain Markdown
 
-插件不会影响普通的 Markdown 渲染：
+Normal markdown still renders as usual:
 
-- 列表项 1
-- 列表项 2
-- 列表项 3
+- List item 1
+- List item 2
+- List item 3
 
-**粗体文本** 和 *斜体文本* 都能正常工作。
+**Bold text** and *italic text* still work.
 
 \`\`\`javascript
-const message = "代码块也能正常显示";
+const message = "Code blocks also render correctly";
 console.log(message);
 \`\`\`
 `);

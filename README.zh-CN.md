@@ -1,8 +1,8 @@
-# markdown-it-vue-component-renderer
+﻿# markdown-it-vue-component-renderer
 
 [English README](./README.md)
 
-把 `markdown-it` 自定义容器语法渲染成 Vue 3 组件。这个包提供两种主要用法：
+将 `markdown-it` 中的自定义区块渲染成 Vue 3 组件。这个包提供两种主要用法：
 
 - 直接使用 `MarkdownRenderer` 组件
 - 把它当作标准 `markdown-it` 插件，再配合 `mountComponents()` 手动挂载
@@ -18,16 +18,7 @@ Peer dependencies:
 - `vue@^3`
 - `markdown-it@^14`
 
-## 使用方式
-
-### 方式一：`MarkdownRenderer` 组件
-
-这是推荐方式。`MarkdownRenderer` 会负责：
-
-- 渲染 Markdown
-- 识别自定义组件容器
-- 挂载对应 Vue 组件
-- 在内容频繁更新时自动清理旧挂载，避免残留实例
+## 推荐用法：`MarkdownRenderer`
 
 ```vue
 <template>
@@ -44,7 +35,7 @@ import Table from './components/Table.vue';
 import Alert from './components/Alert.vue';
 
 const markdownContent = ref(`
-# 标题
+# 示例
 
 :::table {"title":"用户列表","headers":["姓名","年龄"],"rows":[["张三",25]]}
 :::
@@ -55,9 +46,14 @@ const markdownContent = ref(`
 </script>
 ```
 
-### 方式二：`markdown-it` 插件 + `mountComponents()`
+`MarkdownRenderer` 会负责：
 
-如果你已经有自己的 Markdown 渲染流程，也可以手动接入：
+- Markdown 渲染
+- 占位节点生成
+- Vue 组件挂载
+- 内容更新时的旧实例清理
+
+## 手动用法：`markdown-it` 插件 + `mountComponents()`
 
 ```vue
 <template>
@@ -119,9 +115,79 @@ onUnmounted(() => {
 </script>
 ```
 
+## 自定义语法
+
+### 使用 `syntax.marker` 更换分隔符
+
+```ts
+mdi.use(MarkdownVueComponent, {
+  components,
+  syntax: {
+    marker: '@@@'
+  }
+});
+```
+
+```md
+@@@alert {"type":"info","content":"自定义分隔符依然会挂载 Vue 组件。"}
+@@@
+```
+
+### 使用 `syntax.matcher` 自定义整套匹配逻辑
+
+```ts
+mdi.use(MarkdownVueComponent, {
+  components,
+  syntax: {
+    matcher({ state, startLine, endLine, componentEntries }) {
+      const openLine = state.src
+        .slice(state.bMarks[startLine] + state.tShift[startLine], state.eMarks[startLine])
+        .trim();
+
+      const tagMatch = openLine.match(/^<([^\s>]+)(?:\s+(.+))?>$/);
+      const bracketMatch = openLine.match(/^\[\[([^\s\]]+)(?:\s+(.+))?\]\]$/);
+      const match = tagMatch ?? bracketMatch;
+      if (!match) return null;
+
+      const [, containerKey, inlineArgsRaw = ''] = match;
+      if (!componentEntries.has(containerKey)) return null;
+
+      const closeLine = tagMatch ? `</${containerKey}>` : `[[/${containerKey}]]`;
+      for (let lineNo = startLine + 1; lineNo < endLine; lineNo++) {
+        const line = state.src
+          .slice(state.bMarks[lineNo] + state.tShift[lineNo], state.eMarks[lineNo])
+          .trim();
+        if (line === closeLine) {
+          return {
+            nextLine: lineNo + 1,
+            containerKey,
+            inlineArgsRaw,
+            bodyRaw: state.getLines(startLine + 1, lineNo, 0, false).trimEnd()
+          };
+        }
+      }
+
+      return null;
+    }
+  }
+});
+```
+
+支持的 Markdown 例子：
+
+```md
+<alert {"type":"info"}>
+标签式自定义语法
+</alert>
+
+[[alert {"type":"success"}]]
+方括号式自定义语法
+[[/alert]]
+```
+
 ## 语法
 
-### 基本语法
+### 行内 JSON
 
 ```md
 :::componentName {"prop1":"value1","prop2":"value2"}
@@ -143,11 +209,11 @@ onUnmounted(() => {
 
 ### 文本正文
 
-如果正文不是合法 JSON，去掉首尾空白后的正文会自动作为 `content` prop：
+当正文不是合法 JSON 时，去掉首尾空白后的正文会自动作为 `content` prop：
 
 ```md
 :::alert {"type":"info"}
-这段文本会变成 `content` prop。
+这段文本会成为 `content` prop。
 :::
 ```
 
@@ -184,6 +250,7 @@ interface MarkdownItComponentOptions {
   typographer?: boolean;
   containerClass?: string;
   wrapperTag?: string;
+  syntax?: MarkdownVueComponentSyntaxOptions;
 }
 ```
 
@@ -194,11 +261,19 @@ interface MarkdownVueComponentOptions {
   components: Record<string, string | Component | ComponentConfig>;
   containerClass?: string;
   wrapperTag?: string;
+  syntax?: MarkdownVueComponentSyntaxOptions;
 }
 
 interface ComponentConfig {
   component: string | Component;
   propsParser?: (content: string, tokens: Token[]) => Record<string, unknown>;
+}
+
+interface MarkdownVueComponentSyntaxOptions {
+  marker?: string;
+  openMarker?: string;
+  closeMarker?: string;
+  matcher?: ContainerMatcher;
 }
 ```
 
@@ -207,7 +282,7 @@ interface ComponentConfig {
 - `string` 注册适合在解析阶段标识组件名
 - 真正运行时挂载时，只有 Vue 组件对象可以被挂载
 
-### `mountComponents`
+### `mountComponents()`
 
 ```ts
 async function mountComponents(
@@ -223,19 +298,19 @@ interface RuntimeController {
 }
 ```
 
-`mountComponents()` 会扫描容器里的 `[data-vue-component]` 节点，并读取：
+`mountComponents()` 会扫描容器中的：
 
 - `data-vue-component`
 - `data-vue-props`
 
-插件还会额外输出下面两个属性，方便调试或自定义消费逻辑：
+插件还会输出：
 
 - `data-vue-body`
 - `data-vue-body-format`
 
 ## 动态渲染
 
-如果你是手动调用 `mountComponents()` 来做流式渲染、SSE 或 `watch` 重渲染，建议使用 render token 模式避免异步串线。上面的手动示例就是推荐写法。
+如果你会重复调用 `mountComponents()` 来处理流式输出、SSE 或 watcher 驱动的重新渲染，建议像示例那样维护 render token，并在接受新结果前先销毁旧 controller。
 
 ## 开发
 

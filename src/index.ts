@@ -1,4 +1,5 @@
 import type MarkdownIt from 'markdown-it';
+import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs';
 import type Token from 'markdown-it/lib/token.mjs';
 import type { Component } from 'vue';
 import type { RuntimeController } from './runtime.js';
@@ -12,12 +13,42 @@ export interface MarkdownVueComponentOptions {
   components: Record<string, string | Component | ComponentConfig>;
   containerClass?: string;
   wrapperTag?: string;
+  syntax?: MarkdownVueComponentSyntaxOptions;
 }
 
 type ComponentEntry = {
   componentName: string;
   propsParser: ((content: string, tokens: Token[]) => Record<string, unknown>) | null;
 };
+
+export interface ContainerMatcherComponentEntry {
+  componentName: string;
+}
+
+export interface ContainerMatcherContext {
+  state: StateBlock;
+  startLine: number;
+  endLine: number;
+  silent: boolean;
+  componentEntries: ReadonlyMap<string, ContainerMatcherComponentEntry>;
+  wrapperTag: string;
+}
+
+export interface ContainerMatchResult {
+  nextLine: number;
+  containerKey: string;
+  inlineArgsRaw?: string;
+  bodyRaw?: string;
+}
+
+export type ContainerMatcher = (context: ContainerMatcherContext) => ContainerMatchResult | null;
+
+export interface MarkdownVueComponentSyntaxOptions {
+  marker?: string;
+  openMarker?: string;
+  closeMarker?: string;
+  matcher?: ContainerMatcher;
+}
 
 type PlaceholderMeta = {
   containerKey: string;
@@ -32,42 +63,34 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
   const {
     components,
     containerClass = 'vue-component',
-    wrapperTag = 'div'
+    wrapperTag = 'div',
+    syntax
   } = options;
 
   const componentEntries = buildComponentEntries(components);
+  const publicComponentEntries = buildMatcherComponentEntries(componentEntries);
+  const matcher = syntax?.matcher || createDefaultMatcher(componentEntries, syntax);
 
   md.block.ruler.before(
     'fence',
     'vue_component',
     function vueComponentRule(state, startLine, endLine, silent) {
-      const pos = state.bMarks[startLine] + state.tShift[startLine];
-      const max = state.eMarks[startLine];
-      const line = state.src.slice(pos, max);
+      const match = matcher({
+        state,
+        startLine,
+        endLine,
+        silent,
+        componentEntries: publicComponentEntries,
+        wrapperTag
+      });
 
-      if (!line.startsWith(':::')) {
+      if (!match || match.nextLine <= startLine) {
         return false;
       }
 
-      const trimmedAfter = line.slice(3).trimStart();
-      if (!trimmedAfter) {
-        return false;
-      }
-
-      const parsed = parseContainerOpen(trimmedAfter, componentEntries);
-      if (!parsed) {
-        return false;
-      }
-
-      const { containerKey, inlineArgsRaw } = parsed;
+      const { containerKey } = match;
       const entry = componentEntries.get(containerKey);
       if (!entry) {
-        return false;
-      }
-
-      const closeLine = findCloseLine(state, startLine + 1, endLine);
-      if (closeLine === null) {
-        // Unclosed container: let markdown-it treat it as normal markdown.
         return false;
       }
 
@@ -75,12 +98,8 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
         return true;
       }
 
-      const bodyLines: string[] = [];
-      for (let lineNo = startLine + 1; lineNo < closeLine; lineNo++) {
-        const bodyPos = state.bMarks[lineNo] + state.tShift[lineNo];
-        const bodyMax = state.eMarks[lineNo];
-        bodyLines.push(state.src.slice(bodyPos, bodyMax));
-      }
+      const inlineArgsRaw = match.inlineArgsRaw || '';
+      const bodyRaw = match.bodyRaw || '';
 
       const token = state.push('vue_component', wrapperTag, 0);
       token.block = true;
@@ -88,7 +107,7 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
         containerKey,
         componentName: entry.componentName,
         inlineArgsRaw,
-        bodyRaw: bodyLines.join('\n'),
+        bodyRaw,
         propsParser: entry.propsParser,
         contextTokens: buildContextTokens(
           state,
@@ -96,11 +115,11 @@ export default function MarkdownVueComponent(md: MarkdownIt, options: MarkdownVu
           containerKey,
           entry.componentName,
           inlineArgsRaw,
-          bodyLines.join('\n')
+          bodyRaw
         )
       } satisfies PlaceholderMeta;
 
-      state.line = closeLine + 1;
+      state.line = match.nextLine;
       return true;
     },
     { alt: ['paragraph', 'reference', 'blockquote', 'list'] }
@@ -158,17 +177,75 @@ function buildComponentEntries(
   return entries;
 }
 
+function buildMatcherComponentEntries(
+  componentEntries: Map<string, ComponentEntry>
+): ReadonlyMap<string, ContainerMatcherComponentEntry> {
+  return new Map(
+    Array.from(componentEntries.entries()).map(([key, entry]) => [
+      key,
+      { componentName: entry.componentName }
+    ])
+  );
+}
+
+function createDefaultMatcher(
+  componentEntries: Map<string, ComponentEntry>,
+  syntax: MarkdownVueComponentSyntaxOptions | undefined
+): ContainerMatcher {
+  const { openMarker, closeMarker } = resolveMarkers(syntax);
+  const componentKeys = Array.from(componentEntries.keys());
+
+  return ({ state, startLine, endLine }) => {
+    const line = getLine(state, startLine);
+    if (!line.startsWith(openMarker)) {
+      return null;
+    }
+
+    const trimmedAfter = line.slice(openMarker.length).trimStart();
+    if (!trimmedAfter) {
+      return null;
+    }
+
+    const parsed = parseContainerOpen(trimmedAfter, componentKeys, openMarker);
+    if (!parsed) {
+      return null;
+    }
+
+    const closeLine = findCloseLine(state, startLine + 1, endLine, closeMarker);
+    if (closeLine === null) {
+      return null;
+    }
+
+    return {
+      nextLine: closeLine + 1,
+      containerKey: parsed.containerKey,
+      inlineArgsRaw: parsed.inlineArgsRaw,
+      bodyRaw: state.getLines(startLine + 1, closeLine, 0, false).trimEnd()
+    };
+  };
+}
+
+function resolveMarkers(
+  syntax: MarkdownVueComponentSyntaxOptions | undefined
+): { openMarker: string; closeMarker: string } {
+  const marker = syntax?.marker;
+
+  return {
+    openMarker: syntax?.openMarker || marker || ':::',
+    closeMarker: syntax?.closeMarker || marker || ':::'
+  };
+}
+
 function findCloseLine(
-  state: { bMarks: number[]; tShift: number[]; eMarks: number[]; src: string },
+  state: StateBlock,
   startLine: number,
-  endLine: number
+  endLine: number,
+  closeMarker: string
 ): number | null {
   for (let lineNo = startLine; lineNo < endLine; lineNo++) {
-    const pos = state.bMarks[lineNo] + state.tShift[lineNo];
-    const max = state.eMarks[lineNo];
-    const text = state.src.slice(pos, max).trim();
+    const text = getLine(state, lineNo).trim();
 
-    if (text === ':::') {
+    if (text === closeMarker) {
       return lineNo;
     }
   }
@@ -256,10 +333,11 @@ function buildContextTokens(
 
 function parseContainerOpen(
   trimmedAfter: string,
-  componentEntries: Map<string, ComponentEntry>
+  componentKeys: string[],
+  openMarker: string
 ): { containerKey: string; inlineArgsRaw: string } | null {
   // Reject "::::" which would otherwise parse as a container with ":" as the name.
-  if (trimmedAfter.startsWith(':')) {
+  if (openMarker === ':::' && trimmedAfter.startsWith(':')) {
     return null;
   }
 
@@ -267,16 +345,16 @@ function parseContainerOpen(
   if (spaceIndex !== -1) {
     const containerKey = trimmedAfter.slice(0, spaceIndex);
     const inlineArgsRaw = trimmedAfter.slice(spaceIndex).trim();
-    return componentEntries.has(containerKey) ? { containerKey, inlineArgsRaw } : null;
+    return componentKeys.includes(containerKey) ? { containerKey, inlineArgsRaw } : null;
   }
 
-  if (componentEntries.has(trimmedAfter)) {
+  if (componentKeys.includes(trimmedAfter)) {
     return { containerKey: trimmedAfter, inlineArgsRaw: '' };
   }
 
   // Back-compat: allow inline JSON immediately after the key (e.g. ":::probe{\"a\":1}"),
   // using a best-effort "longest registered key prefix" match.
-  const keys = Array.from(componentEntries.keys()).sort((a, b) => b.length - a.length);
+  const keys = [...componentKeys].sort((a, b) => b.length - a.length);
   for (const key of keys) {
     if (!trimmedAfter.startsWith(key)) {
       continue;
@@ -291,4 +369,8 @@ function parseContainerOpen(
   }
 
   return null;
+}
+
+function getLine(state: StateBlock, lineNo: number): string {
+  return state.src.slice(state.bMarks[lineNo] + state.tShift[lineNo], state.eMarks[lineNo]);
 }

@@ -1,9 +1,9 @@
 <template>
   <div>
-    <h1>标准 markdown-it 插件使用示例</h1>
+    <h1>Simple Syntax Customization Demo</h1>
 
     <div class="demo-section">
-      <h2>使用方式</h2>
+      <h2>Usage</h2>
       <pre><code>import MarkdownIt from 'markdown-it';
 import MarkdownVueComponent, {
   mountComponents,
@@ -14,7 +14,12 @@ import Alert from './components/Alert.vue';
 
 const components = { table: Table, alert: Alert };
 const mdi = new MarkdownIt({ html: true });
-mdi.use(MarkdownVueComponent, { components });
+mdi.use(MarkdownVueComponent, {
+  components,
+  syntax: {
+    marker: '@@@'
+  }
+});
 
 let controller: RuntimeController | null = null;
 let renderToken = 0;
@@ -38,18 +43,18 @@ controller = nextController;</code></pre>
     </div>
 
     <div class="demo-section">
-      <h2>Markdown 源码</h2>
+      <h2>Markdown Source</h2>
       <pre><code>{{ markdownContent }}</code></pre>
     </div>
 
     <div class="demo-section">
-      <h2>渲染后的 HTML</h2>
+      <h2>Rendered HTML</h2>
       <pre class="html-output"><code>{{ renderedHtml }}</code></pre>
     </div>
 
     <div class="demo-section">
-      <h2>最终渲染结果</h2>
-      <div class="markdown-content" ref="containerRef"></div>
+      <h2>Mounted Result</h2>
+      <div ref="containerRef" class="markdown-content"></div>
     </div>
   </div>
 </template>
@@ -63,29 +68,31 @@ import Alert from './components/Alert.vue';
 import Table from './components/Table.vue';
 
 const markdownContent = ref(`
-# 标准插件使用示例
+# syntax.marker Demo
 
-这个示例展示了如何把本库当作标准 \`markdown-it\` 插件使用，并配合 \`mountComponents()\` 手动挂载 Vue 组件。
+This page demonstrates simple syntax customization by replacing the default \`:::\` delimiter with \`@@@\`.
 
-## 表格组件
+The rendering, mounting, and cleanup pipeline stays the same. Only the block delimiter changes.
 
-:::table {"title": "用户列表", "headers": ["姓名", "年龄", "城市"], "rows": [["张三", 25, "北京"], ["李四", 30, "上海"]], "striped": true}
-:::
+## Alert example
 
-## 提示组件
+@@@alert {"type": "info", "title": "Custom delimiter", "content": "Use syntax.marker when you only need to change the container marker."}
+@@@
 
-:::alert {"type": "info", "title": "提示", "content": "手动挂载时要保存 RuntimeController，并在重渲染前先销毁旧实例。"}
-:::
+@@@alert {"type": "success", "content": "The parser still produces the same placeholder format for the runtime layer."}
+@@@
 
-:::alert {"type": "success", "content": "这样可以避免旧渲染残留在容器中。"}
-:::
+## Table example
 
-## 普通 Markdown
+@@@table {"title": "Users", "headers": ["Name", "Age", "City"], "rows": [["Alice", 25, "Beijing"], ["Bob", 30, "Shanghai"]], "striped": true}
+@@@
 
-- 列表项 1
-- 列表项 2
+## Plain Markdown
 
-**粗体** 和 *斜体*
+- Existing markdown still works
+- RuntimeController cleanup still applies
+
+**Bold** and *italic* text render as usual.
 `);
 
 const renderedHtml = ref('');
@@ -98,7 +105,10 @@ const componentMap: Record<string, Component> = {
 
 const mdi = new MarkdownIt({ html: true });
 mdi.use(MarkdownVueComponent, {
-  components: componentMap
+  components: componentMap,
+  syntax: {
+    marker: '@@@'
+  }
 });
 
 let mountedController: RuntimeController | null = null;
@@ -130,10 +140,10 @@ async function renderMarkdown() {
 }
 
 onMounted(() => {
-  renderMarkdown();
+  void renderMarkdown();
 });
 
-watch(markdownContent, renderMarkdown);
+watch(markdownContent, () => void renderMarkdown());
 
 onUnmounted(() => {
   activeRenderToken = ++renderToken;
@@ -148,7 +158,7 @@ onUnmounted(() => {
   padding: 1.5rem;
   border-radius: 8px;
   margin: 1.5rem 0;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .demo-section h2 {

@@ -11,6 +11,7 @@ Render Vue 3 components from `markdown-it` container blocks. This package provid
 - Mount components manually on top of an existing `markdown-it` render flow
 - Support JSON props from inline arguments or multiline block bodies
 - Handle repeated or streaming updates with `RuntimeController`
+- Customize the block matching syntax with delimiter options or a custom matcher
 
 ## Installation
 
@@ -123,6 +124,60 @@ onUnmounted(() => {
 </script>
 ```
 
+## Custom Syntax
+
+Use `syntax.marker` when you only want to change the delimiter:
+
+```ts
+mdi.use(MarkdownVueComponent, {
+  components,
+  syntax: {
+    marker: '@@@'
+  }
+});
+```
+
+```md
+@@@alert {"type":"info","content":"Custom delimiters still mount Vue components."}
+@@@
+```
+
+Use `syntax.matcher` when you need a completely different block shape:
+
+```ts
+mdi.use(MarkdownVueComponent, {
+  components,
+  syntax: {
+    matcher({ state, startLine, endLine, componentEntries }) {
+      const openLine = state.src
+        .slice(state.bMarks[startLine] + state.tShift[startLine], state.eMarks[startLine])
+        .trim();
+      const match = openLine.match(/^<([^\s>]+)(?:\s+(.+))?>$/);
+      if (!match) return null;
+
+      const [, containerKey, inlineArgsRaw = ''] = match;
+      if (!componentEntries.has(containerKey)) return null;
+
+      for (let lineNo = startLine + 1; lineNo < endLine; lineNo++) {
+        const line = state.src
+          .slice(state.bMarks[lineNo] + state.tShift[lineNo], state.eMarks[lineNo])
+          .trim();
+        if (line === `</${containerKey}>`) {
+          return {
+            nextLine: lineNo + 1,
+            containerKey,
+            inlineArgsRaw,
+            bodyRaw: state.getLines(startLine + 1, lineNo, 0, false).trimEnd()
+          };
+        }
+      }
+
+      return null;
+    }
+  }
+});
+```
+
 ## Syntax
 
 ### Inline JSON
@@ -188,6 +243,7 @@ interface MarkdownItComponentOptions {
   typographer?: boolean;
   containerClass?: string;
   wrapperTag?: string;
+  syntax?: MarkdownVueComponentSyntaxOptions;
 }
 ```
 
@@ -198,11 +254,19 @@ interface MarkdownVueComponentOptions {
   components: Record<string, string | Component | ComponentConfig>;
   containerClass?: string;
   wrapperTag?: string;
+  syntax?: MarkdownVueComponentSyntaxOptions;
 }
 
 interface ComponentConfig {
   component: string | Component;
   propsParser?: (content: string, tokens: Token[]) => Record<string, unknown>;
+}
+
+interface MarkdownVueComponentSyntaxOptions {
+  marker?: string;
+  openMarker?: string;
+  closeMarker?: string;
+  matcher?: ContainerMatcher;
 }
 ```
 
