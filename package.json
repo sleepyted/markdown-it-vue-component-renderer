@@ -1,6 +1,6 @@
 {
   "name": "markdown-it-vue-component-renderer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Render Vue 3 components from markdown-it container blocks with a ready-to-use MarkdownRenderer or manual runtime mounting.",
   "type": "module",
   "main": "./dist/index.js",

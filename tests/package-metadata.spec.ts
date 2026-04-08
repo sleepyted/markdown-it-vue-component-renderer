@@ -23,7 +23,7 @@ const packageJson = JSON.parse(
 describe('package metadata for npm publishing', () => {
   test('uses the chosen publishable package identity', () => {
     expect(packageJson.name).toBe('markdown-it-vue-component-renderer');
-    expect(packageJson.version).toBe('0.1.0');
+    expect(packageJson.version).toBe('0.2.0');
     expect(packageJson.license).toBe('MIT');
   });
 
